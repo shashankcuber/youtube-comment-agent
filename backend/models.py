@@ -32,6 +32,15 @@ class SentimentGroup(BaseModel):
     examples: List[str]
 
 
+class LLMStatus(BaseModel):
+    attempted: bool = False
+    success: bool = False
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    source: str = "rule_based"
+    error: Optional[str] = None
+
+
 class RecommendationResult(BaseModel):
     overall_sentiment: str
     watch_rating: float
@@ -42,3 +51,16 @@ class RecommendationResult(BaseModel):
     warnings: List[str]
     groups: List[SentimentGroup]
     total_comments_analyzed: int
+
+    # Important for v1.1.0 display/debugging
+    result_source: str = "rule_based"
+    llm_status: LLMStatus = LLMStatus()
+
+    # Optional LLM-enhanced fields
+    llm_summary: Optional[str] = None
+    llm_recommendation: Optional[str] = None
+    llm_decision: Optional[str] = None
+    llm_confidence: Optional[str] = None
+    llm_positive_themes: Optional[List[str]] = None
+    llm_negative_themes: Optional[List[str]] = None
+    llm_warning_themes: Optional[List[str]] = None

@@ -1,30 +1,38 @@
-from typing import List
-from models import ParsedComment, SentimentGroup, RecommendationResult
+from typing import List, Optional, Dict, Any
+
+from models import ParsedComment, SentimentGroup, RecommendationResult, LLMStatus
+from llm_client import LocalLLMClient
 
 
 class RecommendationAgent:
     """
     Agent 3:
-    Groups comments and creates final watch recommendation.
+    - First performs rule-based grouping and scoring.
+    - Then optionally asks a local LLM to improve the final summary/recommendation.
+    - If the LLM fails, it always falls back to the rule-based output.
     """
 
-    def __init__(self):
+    def __init__(self, llm_client: Optional[LocalLLMClient] = None):
+        self.llm_client = llm_client
+
         self.positive_words = [
             "helpful", "clear", "great", "excellent", "amazing",
             "useful", "best", "love", "easy to understand",
-            "well explained", "good explanation", "thank you"
+            "well explained", "good explanation", "thank you",
+            "thanks", "perfect", "awesome", "informative"
         ]
 
         self.negative_words = [
             "bad", "boring", "confusing", "waste", "too long",
             "not helpful", "poor", "wrong", "terrible",
-            "hard to understand", "disappointed"
+            "hard to understand", "disappointed", "unclear",
+            "annoying", "slow"
         ]
 
         self.warning_words = [
             "outdated", "misleading", "clickbait", "incorrect",
             "fake", "not accurate", "old version", "doesn't work",
-            "error", "mistake"
+            "does not work", "error", "mistake", "wrong information"
         ]
 
     def classify_comment(self, comment: ParsedComment) -> str:
@@ -70,11 +78,19 @@ class RecommendationAgent:
 
         return round(max(0.0, min(10.0, score)), 1)
 
-    def generate_recommendation(self, rating: float, warning_count: int, total_count: int) -> str:
+    def generate_recommendation(
+        self,
+        rating: float,
+        warning_count: int,
+        total_count: int
+    ) -> str:
         warning_ratio = warning_count / total_count if total_count else 0
 
+        if total_count == 0:
+            return "Not enough useful comments were available to make a recommendation."
+
         if warning_ratio > 0.25:
-            return "Be careful. Many viewers mention issues like outdated, misleading, or incorrect information."
+            return "Be careful. Many useful comments mention issues such as outdated, misleading, or incorrect information."
 
         if rating >= 8:
             return "Strongly recommended. Viewers are mostly positive about this video."
@@ -105,7 +121,7 @@ class RecommendationAgent:
         if warning_ratio > 0.25:
             return (
                 "The comment section contains several warning signs. "
-                "Many viewers mention problems such as outdated, misleading, or incorrect information."
+                "Many viewers mention possible outdated, misleading, or incorrect information."
             )
 
         if positive_ratio > 0.6:
@@ -116,14 +132,30 @@ class RecommendationAgent:
 
         if negative_ratio > 0.4:
             return (
-                "Viewer reaction appears negative or mixed. Several users complain about the quality, "
-                "clarity, pacing, or usefulness of the video."
+                "Viewer reaction appears negative or mixed. Several users complain about quality, "
+                "clarity, pacing, or usefulness."
             )
 
         return (
             "Viewer reaction is mixed. Some users found the video useful, while others had concerns "
             "or asked follow-up questions."
         )
+
+    def get_overall_sentiment(
+        self,
+        positive_count: int,
+        negative_count: int,
+        neutral_count: int,
+        warning_count: int
+    ) -> str:
+        counts = {
+            "mostly_positive": positive_count,
+            "mostly_negative": negative_count,
+            "mostly_neutral": neutral_count,
+            "warning_heavy": warning_count
+        }
+
+        return max(counts, key=counts.get)
 
     def analyze(self, comments: List[ParsedComment]) -> RecommendationResult:
         positive = []
@@ -166,6 +198,10 @@ class RecommendationAgent:
             total_count=total
         )
 
+        overall_sentiment = self.get_overall_sentiment(
+            len(positive), len(negative), len(neutral), len(warning)
+        )
+
         groups = [
             SentimentGroup(
                 label="positive",
@@ -190,20 +226,82 @@ class RecommendationAgent:
         ]
 
         positives = [
-            "Viewers mention that the video is helpful or clear."
+            "Viewers mention that the video is helpful, clear, or useful."
         ] if positive else []
 
         negatives = [
-            "Some viewers complain about pacing, usefulness, or clarity."
+            "Some viewers complain about pacing, usefulness, clarity, or quality."
         ] if negative else []
 
         warnings = [
             "Some viewers mention possible outdated, misleading, or incorrect information."
         ] if warning else []
 
-        overall_sentiment = self.get_overall_sentiment(
-            len(positive), len(negative), len(neutral), len(warning)
+        llm_status = LLMStatus(
+            attempted=False,
+            success=False,
+            provider=self.llm_client.provider if self.llm_client else None,
+            model=self.llm_client.model if self.llm_client else None,
+            source="rule_based",
+            error=None
         )
+
+        llm_data = None
+
+        if self.llm_client and self.llm_client.enabled and total > 0:
+            llm_status.attempted = True
+
+            rule_based_stats: Dict[str, Any] = {
+                "positive_count": len(positive),
+                "negative_count": len(negative),
+                "neutral_count": len(neutral),
+                "warning_count": len(warning),
+                "total_comments": total,
+                "overall_sentiment": overall_sentiment,
+                "rule_based_rating": rating,
+                "rule_based_summary": summary,
+                "rule_based_recommendation": recommendation
+            }
+
+            comment_texts = [comment.clean_text for comment in comments]
+
+            try:
+                llm_data = self.llm_client.generate_watch_recommendation(
+                    comments=comment_texts,
+                    rule_based_stats=rule_based_stats
+                )
+
+                llm_status.success = True
+                llm_status.source = "llm"
+
+            except Exception as error:
+                llm_status.success = False
+                llm_status.source = "rule_based_fallback"
+                llm_status.error = str(error)
+
+        if llm_data:
+            return RecommendationResult(
+                overall_sentiment=overall_sentiment,
+                watch_rating=llm_data.get("rating", rating),
+                recommendation=llm_data.get("recommendation", recommendation),
+                summary=llm_data.get("summary", summary),
+                positives=positives,
+                negatives=negatives,
+                warnings=warnings,
+                groups=groups,
+                total_comments_analyzed=total,
+
+                result_source="llm",
+                llm_status=llm_status,
+
+                llm_summary=llm_data.get("summary"),
+                llm_recommendation=llm_data.get("recommendation"),
+                llm_decision=llm_data.get("decision"),
+                llm_confidence=llm_data.get("confidence"),
+                llm_positive_themes=llm_data.get("positive_themes"),
+                llm_negative_themes=llm_data.get("negative_themes"),
+                llm_warning_themes=llm_data.get("warning_themes")
+            )
 
         return RecommendationResult(
             overall_sentiment=overall_sentiment,
@@ -214,21 +312,8 @@ class RecommendationAgent:
             negatives=negatives,
             warnings=warnings,
             groups=groups,
-            total_comments_analyzed=total
+            total_comments_analyzed=total,
+
+            result_source=llm_status.source,
+            llm_status=llm_status
         )
-
-    def get_overall_sentiment(
-        self,
-        positive_count: int,
-        negative_count: int,
-        neutral_count: int,
-        warning_count: int
-    ) -> str:
-        counts = {
-            "mostly_positive": positive_count,
-            "mostly_negative": negative_count,
-            "mostly_neutral": neutral_count,
-            "warning_heavy": warning_count
-        }
-
-        return max(counts, key=counts.get)
