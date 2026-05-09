@@ -1,0 +1,1 @@
+console.log("Comment Pulse popup loaded");

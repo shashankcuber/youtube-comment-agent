@@ -1,0 +1,60 @@
+#comment-pulse-panel {
+  position: fixed;
+  top: 90px;
+  right: 20px;
+  width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: #ffffff;
+  color: #111111;
+  border: 1px solid #dddddd;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  z-index: 999999;
+  font-family: Arial, sans-serif;
+  padding: 16px;
+}
+
+.cp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+#cp-close {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+#cp-analyze-btn {
+  width: 100%;
+  padding: 10px;
+  background: #111111;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+#cp-analyze-btn:hover {
+  opacity: 0.9;
+}
+
+.cp-card {
+  background: #f7f7f7;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.cp-group {
+  margin-bottom: 12px;
+}
+
+.cp-group ul {
+  padding-left: 18px;
+}

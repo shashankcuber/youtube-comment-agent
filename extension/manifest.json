@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Comment Pulse",
+  "version": "1.0.0",
+  "description": "Analyze YouTube comments and decide whether a video is worth watching.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/watch*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Comment Pulse"
+  }
+}
