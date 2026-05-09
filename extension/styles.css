@@ -58,3 +58,27 @@
 .cp-group ul {
   padding-left: 18px;
 }
+
+.cp-llm-success {
+  background: #eefaf0;
+  border-left: 4px solid #2e7d32;
+  padding: 8px;
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.cp-llm-failed {
+  background: #fff4e5;
+  border-left: 4px solid #ef6c00;
+  padding: 8px;
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.cp-llm-disabled {
+  background: #eeeeee;
+  border-left: 4px solid #777777;
+  padding: 8px;
+  border-radius: 6px;
+  margin-top: 8px;
+}

@@ -16,11 +16,10 @@ class LocalLLMClient:
     """
     Local open-source LLM client using Ollama.
 
-    v1.1.0 responsibility:
-    - Receive filtered comments + rule-based stats
-    - Ask a local model such as qwen3:1.7b for a better final summary
-    - Return structured JSON
-    - Never crash the whole app if LLM fails
+    v1.2.0:
+    - Sends raw YouTube comments to the LLM.
+    - Lets the LLM decide sentiment, authenticity signals, public opinion,
+      and watch recommendation.
     """
 
     def __init__(self):
@@ -34,9 +33,6 @@ class LocalLLMClient:
         return self.provider.lower() == "ollama" and bool(self.model)
 
     def health_check(self) -> Dict[str, Any]:
-        """
-        Checks if Ollama is reachable.
-        """
         if not self.enabled:
             return {
                 "enabled": False,
@@ -76,53 +72,77 @@ class LocalLLMClient:
                 "error": str(error)
             }
 
-    def generate_watch_recommendation(
+    def analyze_raw_comments(
         self,
-        comments: List[str],
-        rule_based_stats: Dict[str, Any]
+        raw_comments: List[Dict[str, Any]],
+        max_comments_for_llm: int = 80
     ) -> Dict[str, Any]:
         """
-        Calls Ollama /api/chat and asks the local model for JSON output.
+        Sends raw comments to the LLM and asks it to decide:
+        - public sentiment
+        - authenticity signals
+        - watch recommendation
         """
 
         if not self.enabled:
             raise RuntimeError("Local LLM is disabled.")
 
-        comments_for_prompt = comments[:40]
+        comments_for_prompt = self._prepare_comments_for_prompt(
+            raw_comments=raw_comments,
+            max_comments=max_comments_for_llm
+        )
 
         system_prompt = """
-You are a YouTube comment analysis assistant.
+You are a YouTube public sentiment analysis agent.
 
-Your job:
-- Analyze only the provided comments and rule-based stats.
-- Do not invent details about the video.
-- Do not claim you watched the video.
-- Produce a concise recommendation for whether the user should watch, skim, skip, or stay uncertain.
+You analyze raw YouTube comments to estimate:
+1. Overall public sentiment toward the video.
+2. Whether the audience finds the video useful, misleading, authentic, low-quality, outdated, or controversial.
+3. Whether a new viewer should watch, skim, skip, or remain uncertain.
+
+Important rules:
+- You did not watch the video.
+- You only know the comments provided.
+- Do not invent facts about the video.
+- Do not claim the video is objectively true or false.
+- Authenticity means perceived authenticity from comments only.
 - Return valid JSON only.
 """
 
         user_payload = {
-            "task": "Generate a watch recommendation from YouTube comments.",
-            "rules": [
-                "Use only the comments and stats provided.",
-                "Return JSON only.",
-                "The rating must be between 0 and 10.",
-                "The decision must be one of: watch, skim, skip, uncertain.",
-                "The confidence must be one of: low, medium, high.",
-                "Keep summary and recommendation concise."
-            ],
-            "rule_based_stats": rule_based_stats,
-            "sample_comments": comments_for_prompt,
+            "task": "Analyze raw YouTube comments for sentiment, public opinion, authenticity signals, and watch recommendation.",
+            "comments": comments_for_prompt,
             "required_json_schema": {
-                "summary": "string",
+                "overall_public_sentiment": "mostly_positive | mostly_negative | mixed | mostly_neutral | warning_heavy | uncertain",
+                "sentiment_distribution": {
+                    "positive": "number 0 to 1",
+                    "negative": "number 0 to 1",
+                    "neutral": "number 0 to 1",
+                    "warning": "number 0 to 1"
+                },
+                "authenticity_score": "number from 0 to 10",
+                "authenticity_label": "high_trust | medium_trust | low_trust | uncertain",
+                "authenticity_explanation": "string",
+                "public_opinion_summary": "string",
+                "watch_decision": "watch | skim | skip | uncertain",
+                "watch_rating": "number from 0 to 10",
                 "recommendation": "string",
-                "decision": "watch | skim | skip | uncertain",
-                "rating": "number from 0 to 10",
                 "positive_themes": ["string"],
                 "negative_themes": ["string"],
+                "neutral_themes": ["string"],
                 "warning_themes": ["string"],
+                "evidence_comments": ["short comment excerpts or paraphrases"],
                 "confidence": "low | medium | high"
-            }
+            },
+            "output_rules": [
+                "Return JSON only.",
+                "Keep the summary concise.",
+                "Do not include markdown.",
+                "Do not include chain-of-thought.",
+                "If comments are too noisy or insufficient, use uncertain.",
+                "Ratings must be between 0 and 10.",
+                "Sentiment distribution values must be between 0 and 1 and should approximately sum to 1."
+            ]
         }
 
         response = requests.post(
@@ -141,7 +161,7 @@ Your job:
                     }
                 ],
                 "options": {
-                    "temperature": 0.2
+                    "temperature": 0.1
                 }
             },
             timeout=self.timeout
@@ -156,15 +176,59 @@ Your job:
             raise RuntimeError("LLM returned empty content.")
 
         parsed = self._parse_json_from_text(content)
+        return self._validate_raw_comment_analysis(parsed)
 
-        return self._validate_llm_output(parsed)
+    def _prepare_comments_for_prompt(
+        self,
+        raw_comments: List[Dict[str, Any]],
+        max_comments: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Keeps prompt small enough for local models.
+        Sort by like_count first so the model sees influential comments.
+        """
+
+        sorted_comments = sorted(
+            raw_comments,
+            key=lambda c: c.get("like_count", 0),
+            reverse=True
+        )
+
+        prepared = []
+
+        for comment in sorted_comments[:max_comments]:
+            text = str(comment.get("text", "")).strip()
+
+            if not text:
+                continue
+
+            prepared.append(
+                {
+                    "text": text[:600],
+                    "like_count": comment.get("like_count", 0),
+                    "published_at": comment.get("published_at")
+                }
+            )
+
+        return prepared
 
     def _parse_json_from_text(self, text: str) -> Dict[str, Any]:
         """
-        Some small local models may wrap JSON with extra text.
-        This extracts the first JSON object safely.
+        Local models sometimes return:
+        <think>...</think>
+        { json }
+
+        This removes thinking tags and extracts JSON.
         """
+
         text = text.strip()
+
+        text = re.sub(
+            r"<think>.*?</think>",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE
+        ).strip()
 
         try:
             return json.loads(text)
@@ -174,40 +238,101 @@ Your job:
         match = re.search(r"\{.*\}", text, re.DOTALL)
 
         if not match:
-            raise ValueError(f"Could not find JSON in LLM response: {text[:300]}")
+            raise ValueError(f"Could not find JSON in LLM response: {text[:500]}")
 
         return json.loads(match.group(0))
 
-    def _validate_llm_output(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Normalizes the LLM response so the rest of the app can trust it.
-        """
+    def _validate_raw_comment_analysis(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        allowed_sentiments = {
+            "mostly_positive",
+            "mostly_negative",
+            "mixed",
+            "mostly_neutral",
+            "warning_heavy",
+            "uncertain"
+        }
 
-        decision = str(data.get("decision", "uncertain")).lower()
-        if decision not in {"watch", "skim", "skip", "uncertain"}:
-            decision = "uncertain"
+        allowed_trust_labels = {
+            "high_trust",
+            "medium_trust",
+            "low_trust",
+            "uncertain"
+        }
+
+        allowed_decisions = {
+            "watch",
+            "skim",
+            "skip",
+            "uncertain"
+        }
+
+        allowed_confidence = {
+            "low",
+            "medium",
+            "high"
+        }
+
+        overall = str(data.get("overall_public_sentiment", "uncertain")).lower()
+        if overall not in allowed_sentiments:
+            overall = "uncertain"
+
+        authenticity_label = str(data.get("authenticity_label", "uncertain")).lower()
+        if authenticity_label not in allowed_trust_labels:
+            authenticity_label = "uncertain"
+
+        watch_decision = str(data.get("watch_decision", "uncertain")).lower()
+        if watch_decision not in allowed_decisions:
+            watch_decision = "uncertain"
 
         confidence = str(data.get("confidence", "low")).lower()
-        if confidence not in {"low", "medium", "high"}:
+        if confidence not in allowed_confidence:
             confidence = "low"
 
-        try:
-            rating = float(data.get("rating", 5.0))
-        except Exception:
-            rating = 5.0
+        authenticity_score = self._clamp_float(
+            data.get("authenticity_score", 5.0),
+            0.0,
+            10.0
+        )
 
-        rating = max(0.0, min(10.0, rating))
+        watch_rating = self._clamp_float(
+            data.get("watch_rating", 5.0),
+            0.0,
+            10.0
+        )
+
+        distribution = data.get("sentiment_distribution", {})
+        sentiment_distribution = {
+            "positive": self._clamp_float(distribution.get("positive", 0.0), 0.0, 1.0),
+            "negative": self._clamp_float(distribution.get("negative", 0.0), 0.0, 1.0),
+            "neutral": self._clamp_float(distribution.get("neutral", 0.0), 0.0, 1.0),
+            "warning": self._clamp_float(distribution.get("warning", 0.0), 0.0, 1.0),
+        }
 
         return {
-            "summary": str(data.get("summary", "")).strip(),
+            "overall_public_sentiment": overall,
+            "sentiment_distribution": sentiment_distribution,
+            "authenticity_score": round(authenticity_score, 1),
+            "authenticity_label": authenticity_label,
+            "authenticity_explanation": str(data.get("authenticity_explanation", "")).strip(),
+            "public_opinion_summary": str(data.get("public_opinion_summary", "")).strip(),
+            "watch_decision": watch_decision,
+            "watch_rating": round(watch_rating, 1),
             "recommendation": str(data.get("recommendation", "")).strip(),
-            "decision": decision,
-            "rating": round(rating, 1),
             "positive_themes": self._ensure_list(data.get("positive_themes", [])),
             "negative_themes": self._ensure_list(data.get("negative_themes", [])),
+            "neutral_themes": self._ensure_list(data.get("neutral_themes", [])),
             "warning_themes": self._ensure_list(data.get("warning_themes", [])),
+            "evidence_comments": self._ensure_list(data.get("evidence_comments", []))[:5],
             "confidence": confidence
         }
+
+    def _clamp_float(self, value: Any, minimum: float, maximum: float) -> float:
+        try:
+            number = float(value)
+        except Exception:
+            number = minimum
+
+        return max(minimum, min(maximum, number))
 
     def _ensure_list(self, value: Any) -> List[str]:
         if isinstance(value, list):

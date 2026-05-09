@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 
 
@@ -52,11 +52,9 @@ class RecommendationResult(BaseModel):
     groups: List[SentimentGroup]
     total_comments_analyzed: int
 
-    # Important for v1.1.0 display/debugging
     result_source: str = "rule_based"
-    llm_status: LLMStatus = LLMStatus()
+    llm_status: LLMStatus = Field(default_factory=LLMStatus)
 
-    # Optional LLM-enhanced fields
     llm_summary: Optional[str] = None
     llm_recommendation: Optional[str] = None
     llm_decision: Optional[str] = None
@@ -64,3 +62,39 @@ class RecommendationResult(BaseModel):
     llm_positive_themes: Optional[List[str]] = None
     llm_negative_themes: Optional[List[str]] = None
     llm_warning_themes: Optional[List[str]] = None
+
+
+class PublicSentimentResult(BaseModel):
+    """
+    New v1.2.0 final output model.
+    This is designed for raw-comment LLM analysis.
+    """
+
+    result_source: str
+    llm_status: LLMStatus = Field(default_factory=LLMStatus)
+
+    total_raw_comments: int
+    comments_sent_to_llm: int
+
+    overall_public_sentiment: str
+    sentiment_distribution: Dict[str, float]
+
+    authenticity_score: float
+    authenticity_label: str
+    authenticity_explanation: str
+
+    public_opinion_summary: str
+    watch_decision: str
+    watch_rating: float
+    recommendation: str
+
+    positive_themes: List[str]
+    negative_themes: List[str]
+    neutral_themes: List[str]
+    warning_themes: List[str]
+
+    evidence_comments: List[str]
+
+    fallback_used: bool = False
+    fallback_reason: Optional[str] = None
+    fallback_rule_based_result: Optional[RecommendationResult] = None
