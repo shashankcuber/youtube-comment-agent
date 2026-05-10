@@ -2,6 +2,8 @@
 backend/venv/
 __pycache__/
 *.pyc
+backend/graph/__pycache__/
+backend/agents/__pycache__/
 
 # Environment variables
 backend/.env

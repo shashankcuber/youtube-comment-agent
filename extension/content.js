@@ -1,3 +1,79 @@
+function renderExecutionSteps(steps) {
+  if (!steps || steps.length === 0) {
+    return "";
+  }
+
+  return `
+    <div class="cp-card">
+      <h4>Agent Execution Steps</h4>
+
+      <div class="cp-step-list">
+        ${steps.map(step => renderExecutionStep(step)).join("")}
+      </div>
+    </div>
+  `;
+}
+
+
+function renderExecutionStep(step) {
+  const icon = getStepIcon(step.status);
+  const cssClass = getStepClass(step.status);
+
+  const duration = step.duration_seconds !== null && step.duration_seconds !== undefined
+    ? `<span class="cp-step-duration">${step.duration_seconds}s</span>`
+    : "";
+
+  const message = step.message
+    ? `<div class="cp-step-message">${escapeHtml(step.message)}</div>`
+    : "";
+
+  return `
+    <div class="cp-step ${cssClass}">
+      <div class="cp-step-main">
+        <span class="cp-step-icon">${icon}</span>
+        <span class="cp-step-label">${escapeHtml(step.label || step.node)}</span>
+        ${duration}
+      </div>
+      ${message}
+    </div>
+  `;
+}
+
+
+function getStepIcon(status) {
+  switch (status) {
+    case "success":
+      return "✅";
+    case "failed":
+      return "❌";
+    case "running":
+      return "⏳";
+    case "fallback":
+      return "🔁";
+    case "skipped":
+      return "⏭️";
+    default:
+      return "•";
+  }
+}
+
+
+function getStepClass(status) {
+  switch (status) {
+    case "success":
+      return "cp-step-success";
+    case "failed":
+      return "cp-step-failed";
+    case "running":
+      return "cp-step-running";
+    case "fallback":
+      return "cp-step-fallback";
+    case "skipped":
+      return "cp-step-skipped";
+    default:
+      return "cp-step-default";
+  }
+}
 function renderGenerationSource(result) {
   const status = result.llm_status;
 
@@ -187,6 +263,7 @@ async function analyzeCurrentVideo() {
       <p><strong>Raw comments fetched:</strong> ${result.total_raw_comments}</p>
       <p><strong>Comments sent to LLM:</strong> ${result.comments_sent_to_llm}</p>
 
+    ${renderExecutionSteps(result.execution_steps)}
       ${renderLLMStatus(result)}
     </div>
 
@@ -272,3 +349,4 @@ function observeYouTubeNavigation() {
 
 createPanel();
 observeYouTubeNavigation();
+
