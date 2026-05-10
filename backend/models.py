@@ -63,18 +63,23 @@ class RecommendationResult(BaseModel):
     llm_negative_themes: Optional[List[str]] = None
     llm_warning_themes: Optional[List[str]] = None
 
-
+class ExecutionStep(BaseModel):
+    node: str
+    label: str
+    status: str  # pending | running | success | failed | skipped | fallback
+    message: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    
 class PublicSentimentResult(BaseModel):
-    """
-    New v1.2.0 final output model.
-    This is designed for raw-comment LLM analysis.
-    """
-
     result_source: str
     llm_status: LLMStatus = Field(default_factory=LLMStatus)
 
+    execution_steps: List[ExecutionStep] = Field(default_factory=list)
+
     total_raw_comments: int
     comments_sent_to_llm: int
+
+    llm_inference_time_seconds: Optional[float] = None
 
     overall_public_sentiment: str
     sentiment_distribution: Dict[str, float]
@@ -98,3 +103,38 @@ class PublicSentimentResult(BaseModel):
     fallback_used: bool = False
     fallback_reason: Optional[str] = None
     fallback_rule_based_result: Optional[RecommendationResult] = None
+# class PublicSentimentResult(BaseModel):
+#     """
+#     New v1.2.0 final output model.
+#     This is designed for raw-comment LLM analysis.
+#     """
+
+#     result_source: str
+#     llm_status: LLMStatus = Field(default_factory=LLMStatus)
+
+#     total_raw_comments: int
+#     comments_sent_to_llm: int
+
+#     overall_public_sentiment: str
+#     sentiment_distribution: Dict[str, float]
+
+#     authenticity_score: float
+#     authenticity_label: str
+#     authenticity_explanation: str
+
+#     public_opinion_summary: str
+#     watch_decision: str
+#     watch_rating: float
+#     recommendation: str
+
+#     positive_themes: List[str]
+#     negative_themes: List[str]
+#     neutral_themes: List[str]
+#     warning_themes: List[str]
+
+#     evidence_comments: List[str]
+
+#     fallback_used: bool = False
+#     fallback_reason: Optional[str] = None
+#     fallback_rule_based_result: Optional[RecommendationResult] = None
+
